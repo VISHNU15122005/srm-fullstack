@@ -2,28 +2,37 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
+// Root route (IMPORTANT for Railway)
+app.get("/", (req, res) => {
+    res.send("API is running 🚀");
+});
+
+// POST /bfhl
 app.post("/bfhl", (req, res) => {
     const data = req.body.data || [];
 
     let validEdges = [];
-    let invalid = [];
-    let duplicates = [];
+    let invalid_entries = [];
+    let duplicate_edges = [];
     let seen = new Set();
 
+    // Step 1: Validation + duplicates
     for (let entry of data) {
         let clean = entry.trim();
 
         if (!/^[A-Z]->[A-Z]$/.test(clean) || clean[0] === clean[3]) {
-            invalid.push(entry);
+            invalid_entries.push(entry);
             continue;
         }
 
         if (seen.has(clean)) {
-            if (!duplicates.includes(clean)) {
-                duplicates.push(clean);
+            if (!duplicate_edges.includes(clean)) {
+                duplicate_edges.push(clean);
             }
         } else {
             seen.add(clean);
@@ -31,24 +40,38 @@ app.post("/bfhl", (req, res) => {
         }
     }
 
+    // Step 2: Build graph
     let graph = {};
-    let children = new Set();
+    let childSet = new Set();
 
     for (let edge of validEdges) {
-        let [p, c] = edge.split("->");
+        let [parent, child] = edge.split("->");
 
-        if (!graph[p]) graph[p] = [];
-        graph[p].push(c);
-        children.add(c);
+        if (!graph[parent]) graph[parent] = [];
+        graph[parent].push(child);
+        childSet.add(child);
     }
 
-    let roots = Object.keys(graph).filter(n => !children.has(n));
+    // Step 3: Find roots
+    let roots = Object.keys(graph).filter(node => !childSet.has(node));
 
+    // If no roots (pure cycle), pick smallest node
+    if (roots.length === 0 && validEdges.length > 0) {
+        let nodes = new Set();
+        validEdges.forEach(e => {
+            let [p, c] = e.split("->");
+            nodes.add(p);
+            nodes.add(c);
+        });
+        roots = [Array.from(nodes).sort()[0]];
+    }
+
+    // DFS for tree + cycle detection
     function dfs(node, visited) {
         if (visited.has(node)) return null;
 
         visited.add(node);
-        let tree = {};
+        let subtree = {};
         let maxDepth = 1;
 
         if (graph[node]) {
@@ -56,52 +79,65 @@ app.post("/bfhl", (req, res) => {
                 let result = dfs(child, new Set(visited));
                 if (!result) return null;
 
-                tree[child] = result.tree;
+                subtree[child] = result.tree;
                 maxDepth = Math.max(maxDepth, result.depth + 1);
             }
         }
 
-        return { tree, depth: maxDepth };
+        return { tree: subtree, depth: maxDepth };
     }
 
     let hierarchies = [];
-    let totalCycles = 0;
+    let total_cycles = 0;
+    let largest_tree_root = "";
     let maxDepth = 0;
-    let largestRoot = "";
 
     for (let root of roots) {
         let result = dfs(root, new Set());
 
         if (!result) {
-            hierarchies.push({ root, tree: {}, has_cycle: true });
-            totalCycles++;
+            hierarchies.push({
+                root: root,
+                tree: {},
+                has_cycle: true
+            });
+            total_cycles++;
         } else {
             hierarchies.push({
-                root,
+                root: root,
                 tree: { [root]: result.tree },
                 depth: result.depth
             });
 
-            if (result.depth > maxDepth) {
+            if (
+                result.depth > maxDepth ||
+                (result.depth === maxDepth && root < largest_tree_root)
+            ) {
                 maxDepth = result.depth;
-                largestRoot = root;
+                largest_tree_root = root;
             }
         }
     }
 
+    // Response
     res.json({
-        user_id: "Vishnu_15122005",
-        email_id: "vishnu15122005@email.com",
-        college_roll_number: "RA2311003050072",
-        hierarchies,
-        invalid_entries: invalid,
-        duplicate_edges: duplicates,
+        user_id: "vishnu_15122005", // CHANGE THIS
+        email_id: "vishnu15122005@email.com",   // CHANGE THIS
+        college_roll_number: "RA2311003050072", // CHANGE THIS
+        hierarchies: hierarchies,
+        invalid_entries: invalid_entries,
+        duplicate_edges: duplicate_edges,
         summary: {
             total_trees: hierarchies.filter(h => !h.has_cycle).length,
-            total_cycles: totalCycles,
-            largest_tree_root: largestRoot
+            total_cycles: total_cycles,
+            largest_tree_root: largest_tree_root
         }
     });
 });
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+// PORT fix for Railway
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
